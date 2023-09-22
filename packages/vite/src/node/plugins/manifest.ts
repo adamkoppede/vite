@@ -20,6 +20,21 @@ export interface ManifestChunk {
   dynamicImports?: string[]
 }
 
+const referenceIdToFileNameMappings = new WeakMap<
+  ResolvedConfig,
+  Map<string, string>
+>()
+function getReferenceIdToFileNameMapping(
+  config: ResolvedConfig,
+): Map<string, string> {
+  let mapping = referenceIdToFileNameMappings.get(config)
+  if (mapping === undefined) {
+    mapping = new Map<string, string>()
+    referenceIdToFileNameMappings.set(config, mapping)
+  }
+  return mapping
+}
+
 export function manifestPlugin(config: ResolvedConfig): Plugin {
   const manifest: Manifest = {}
 
@@ -115,10 +130,25 @@ export function manifestPlugin(config: ResolvedConfig): Plugin {
         return manifestChunk
       }
 
+      const getFileName = (referenceId: string): string => {
+        try {
+          const fileName = this.getFileName(referenceId)
+          getReferenceIdToFileNameMapping(config).set(referenceId, fileName)
+          return fileName
+        } catch (error: unknown) {
+          const fallbackName =
+            getReferenceIdToFileNameMapping(config).get(referenceId)
+          if (fallbackName !== undefined) {
+            return fallbackName
+          }
+          throw error
+        }
+      }
+
       const fileNameToAssetMeta = new Map<string, GeneratedAssetMeta>()
       const assets = generatedAssets.get(config)!
       assets.forEach((asset, referenceId) => {
-        const fileName = this.getFileName(referenceId)
+        const fileName = getFileName(referenceId)
         fileNameToAssetMeta.set(fileName, asset)
       })
 
@@ -141,7 +171,7 @@ export function manifestPlugin(config: ResolvedConfig): Plugin {
       // Add deduplicated assets to the manifest
       assets.forEach(({ originalName }, referenceId) => {
         if (!manifest[originalName]) {
-          const fileName = this.getFileName(referenceId)
+          const fileName = getFileName(referenceId)
           const asset = fileNameToAsset.get(fileName)
           if (asset) {
             manifest[originalName] = asset
